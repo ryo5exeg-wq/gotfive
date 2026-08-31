@@ -341,8 +341,125 @@ function fmtEvent(G,e){
   return JSON.stringify(e);
 }
 
+/* ============================================================
+   サーバー側API（Cloudflare Worker が使う。ポンジ等と同じ形）
+   ★隠し情報＝「自分の手札の数字」と「場の裏タイルの数字」。
+     viewFor がそれを削って返す。ここがオンライン版の最重要点。
+   ============================================================ */
+let SG=null; /* サーバーが保持する盤面（Durable Object が保存・復元） */
+function getState(){return SG;}
+function setState(s){SG=s;}
+
+/* 新しい対戦。seats=[{name,ai,level}] */
+function createGame(opts){
+  opts=opts||{};
+  const seats=opts.seats||[];
+  if(seats.length<2||seats.length>4)throw new Error('seats 2-4');
+  SG=newGame({
+    players:seats.map(function(s){return {name:s.name,ai:!!s.ai,level:s.level||'normal'};}),
+    seed:(opts.seed!=null)?opts.seed:((Math.random()*0x7fffffff)|0)
+  });
+  SG.players.forEach(function(p,i){p.human=!(seats[i]&&seats[i].ai);});
+  return SG;
+}
+
+function setSeatAI(seat,isAI){if(SG&&SG.players[seat])SG.players[seat].ai=!!isAI;}
+
+/* AIの手番を人間の入力待ちになるまで進める */
+function serverAdvance(maxSteps){
+  maxSteps=maxSteps||300;
+  let n=0;
+  while(SG&&SG.phase!=='over'&&SG.players[SG.turn].ai&&n<maxSteps){aiStep(SG);n++;}
+  return n;
+}
+
+/* 接続中の席だけ人間扱い・他はAI代行にして進める（workerがポーリング毎に呼ぶ） */
+function serverStep(activeSeats){
+  if(!SG)return 0;
+  const act={};(activeSeats||[]).forEach(function(s){act[s]=1;});
+  SG.players.forEach(function(p,i){
+    const shouldBeAI=!p.human||!act[i];
+    if(p.ai!==shouldBeAI)p.ai=shouldBeAI;
+  });
+  return serverAdvance();
+}
+
+/* いま入力を待っている席（AI手番・終了時は -1） */
+function waitingFor(){
+  if(!SG||SG.phase==='over')return -1;
+  return SG.players[SG.turn].ai?-1:SG.turn;
+}
+
+/* 人間の手を適用する。戻り値 {ok:true} / {error:'…'} */
+function applyAction(seat,a){
+  if(!SG)return {error:'no game'};
+  if(SG.phase==='over')return {error:'ゲームは終了しています'};
+  if(SG.turn!==seat)return {error:'あなたの手番ではありません'};
+  if(!SG.players[seat].alive)return {error:'脱落しています'};
+  a=a||{};
+  try{
+    switch(a.type){
+      case 'flip':{
+        if(SG.phase!=='flip')return {error:'いまはめくれません'};
+        const f=SG.field[a.idx];
+        if(!f||f.up)return {error:'そのタイルはめくれません'};
+        actFlip(SG,a.idx);return {ok:true};
+      }
+      case 'askPos':{
+        if(SG.phase!=='ask')return {error:'いまは質問できません'};
+        const f=SG.field[a.idx];
+        if(!f||!f.up||f.used)return {error:'そのタイルは選べません'};
+        actAskPos(SG,a.idx);return {ok:true};
+      }
+      case 'askDot':{
+        if(SG.phase!=='ask')return {error:'いまは質問できません'};
+        const f=SG.field[a.idx];
+        if(!f||!f.up||f.used)return {error:'そのタイルは選べません'};
+        if(!(a.slot>=0&&a.slot<5))return {error:'何枚目かを選んでください'};
+        actAskDot(SG,a.idx,a.slot);return {ok:true};
+      }
+      case 'pass':{
+        if(SG.phase!=='ask')return {error:'いまはパスできません'};
+        actPass(SG);return {ok:true};
+      }
+      case 'declare':{
+        const g=a.guess;
+        if(!Array.isArray(g)||g.length!==5||g.some(function(v){return !(v>=1&&v<=60);}))
+          return {error:'宣言は5つの数字を選んでください'};
+        actDeclare(SG,g.map(Number));return {ok:true};
+      }
+    }
+    return {error:'不明な操作です'};
+  }catch(e){return {error:'その操作はルール上できません'};}
+}
+
+/* 席 seat に見せてよい情報だけの盤面。
+   隠すもの＝自分の手札の数字（色は見せる）・場の裏タイルの数字（色は見せる）。
+   seat<0（観戦・不明ID）は全員の手札を伏せる（自分の席を観戦で覗く抜け道を防ぐ）。
+   脱落者の手札と、終了後の全手札は公開。 */
+function viewFor(seat){
+  if(!SG)return null;
+  const v=JSON.parse(JSON.stringify(SG));
+  v.you=seat;
+  v.players.forEach(function(p,i){
+    p.isYou=(i===seat);
+    p.handColors=p.hand.map(colorOf);
+    const reveal=(v.phase==='over')||p.revealed||(seat>=0&&i!==seat);
+    if(!reveal)delete p.hand;
+  });
+  v.field=v.field.map(function(f){
+    return f.up?f:{up:false,used:false,c:colorOf(f.n)};
+  });
+  return v;
+}
+
 if(typeof module!=='undefined'&&module.exports){
   module.exports={
+    /* --- サーバー用 --- */
+    getState:getState,setState:setState,createGame:createGame,viewFor:viewFor,
+    applyAction:applyAction,serverStep:serverStep,serverAdvance:serverAdvance,
+    waitingFor:waitingFor,setSeatAI:setSeatAI,
+    /* --- ソロ版・テスト用 --- */
     COLORS:COLORS,COLOR_JP:COLOR_JP,colorOf:colorOf,dotsOf:dotsOf,
     setSeed:setSeed,newGame:newGame,
     posAnswer:posAnswer,dotAnswer:dotAnswer,
