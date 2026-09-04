@@ -241,7 +241,10 @@ input[type=text]::placeholder{color:#8d97c9;}
       </div>
     </div>
     <div id="lobbyErr"></div>
-    <button class="ghost" onclick="openRules()">あそびかた</button>
+    <div style="display:flex;gap:10px;">
+      <button class="ghost" onclick="openRules()">あそびかた</button>
+      <button class="ghost" onclick="location.href='https://ryo5exeg-wq.github.io/ponzi/'">🎲 ゲーム一覧へ</button>
+    </div>
   </div>
 
   <!-- ===== 待合室 ===== -->
@@ -276,6 +279,7 @@ input[type=text]::placeholder{color:#8d97c9;}
       <div class="sp"></div>
       <button class="ghost" onclick="openRules()">あそびかた</button>
       <button class="ghost" id="btnLobby">部屋から出る</button>
+      <button class="ghost" onclick="gotoHub()">🎲 ゲーム一覧へ</button>
     </div>
     <div id="opps"></div>
     <div id="fieldWrap"><h4 id="fieldTitle">場のタイル</h4><div id="field"></div></div>
@@ -338,7 +342,8 @@ input[type=text]::placeholder{color:#8d97c9;}
   <p><b>ドットのひみつ</b>：各色とも小さい数字から ●→●●→●●● の繰り返し
   （例：赤は1=●、6=●●、11=●●●、16=●…）。<br>
   <b>色のひみつ</b>：赤1,6,11…／青2,7,12…／黄3,8,13…／緑4,9,14…／紫5,10,15…（5とびで循環）。</p>
-  <p>自信がついたら手番中いつでも<b>「ゴットファイブ！」</b>と宣言して5つの数字を当てる。
+  <p>自信がついたら<b>「ゴットファイブ！」</b>と宣言して5つの数字を当てる。
+  <b>宣言は自分の番でなくても、いつでもできる</b>（早い者勝ち！）。
   ぜんぶ正解なら勝ち！ 1つでも外れたら脱落…。</p>
   <div class="btns"><button class="primary" onclick="closeModal('mRule')">とじる</button></div>
 </div></div>
@@ -431,6 +436,12 @@ function leaveRoom(){
 }
 $('btnLeave').onclick=leaveRoom;
 $('btnLobby').onclick=leaveRoom;
+function gotoHub(){
+  /* 対戦中は席を保持したまま一覧へ（同じリンクを開けば部屋に戻れる） */
+  if(ST.view&&ST.view.phase!=='over'&&
+     !confirm('ゲーム一覧ページへ移動します。\n\n対戦中のあなたの番はAIが代わりに進めます。\nこのページを開き直せば部屋に戻れます。'))return;
+  location.href='https://ryo5exeg-wq.github.io/ponzi/';
+}
 $('btnAgain').onclick=async function(){
   try{var j=await api('/api/room/'+ST.code+'/restart','POST',{playerId:ST.pid});
     if(!j.ok)alert(j.error||'再戦できませんでした');else $('result').classList.remove('open');}catch(e){alert(e.message);}
@@ -610,7 +621,8 @@ function renderMine(V){
     h+='<div class="memoNote" style="text-align:center;">上の○＝ドット同じ／下の✕＝ドットちがう／すき間のタイル＝位置の答え</div>';
   $('myTiles').innerHTML=h;
   var myTurn=(V.turn===V.you&&me.alive&&V.phase!=='over'&&!ST.busy);
-  $('btnDeclare').disabled=!myTurn;
+  /* 宣言はいつでもできる（相手の手番中でもOK＝実物ルール） */
+  $('btnDeclare').disabled=!(me.alive&&V.phase!=='over');
   $('btnPass').disabled=!(myTurn&&V.phase==='ask');
 }
 function renderLog(V){
@@ -629,7 +641,7 @@ function renderPrompt(V){
   var me=V.players[V.you];
   if(V.phase==='over'){el.textContent='ゲーム終了';return;}
   if(!me.alive){el.textContent='あなたは脱落…。みんなの勝負を見届けよう。';return;}
-  if(V.turn!==V.you){el.textContent=esc(V.players[V.turn].name)+' の番です…';return;}
+  if(V.turn!==V.you){el.textContent=esc(V.players[V.turn].name)+' の番です…（宣言はいつでもOK）';return;}
   if(V.phase==='flip')el.textContent='あなたの番！ 場のうら向きタイルを1枚タップしてめくろう';
   else el.textContent='ひかっているおもて向きタイルから1枚タップして質問！（宣言・「質問しない」もOK）';
 }
@@ -688,7 +700,7 @@ window.sendPass=function(){send({type:'pass'});};
 
 function openDeclare(){
   var V=ST.view;
-  if(!V||ST.busy||V.turn!==V.you)return;
+  if(!V||V.you<0||V.phase==='over'||!V.players[V.you].alive)return;
   decSel=[null,null,null,null,null];
   var me=V.players[V.you];
   var vis={};

@@ -109,9 +109,13 @@ function actPass(G){
   G.log.push({t:'pass',p:G.turn});
   endTurn(G);
 }
-function actDeclare(G,guess){
+/* 宣言はいつでもできる（自分の手番でなくてもよい＝実物ルール・2026-09-04対応）。
+   pi省略時は手番プレイヤー。手番外の宣言で外れた場合、手番はそのまま動かさない。 */
+function actDeclare(G,guess,pi){
   if(G.phase!=='flip'&&G.phase!=='ask')throw new Error('phase');
-  const pi=G.turn, P=G.players[pi];
+  if(pi==null)pi=G.turn;
+  const P=G.players[pi];
+  if(!P||!P.alive)throw new Error('dead');
   const ok=Array.isArray(guess)&&guess.length===5&&
            guess.every(function(v,i){return v===P.hand[i];});
   if(ok){
@@ -124,7 +128,8 @@ function actDeclare(G,guess){
       const w=G.players.findIndex(function(p){return p.alive;});
       G.winner=w; G.phase='over';
       G.log.push({t:'lastman',p:w});
-    }else endTurn(G);
+    }else if(pi===G.turn)endTurn(G);
+    /* 手番外の宣言失敗→手番・フェーズはそのまま */
   }
   return ok;
 }
@@ -394,9 +399,10 @@ function waitingFor(){
 function applyAction(seat,a){
   if(!SG)return {error:'no game'};
   if(SG.phase==='over')return {error:'ゲームは終了しています'};
-  if(SG.turn!==seat)return {error:'あなたの手番ではありません'};
   if(!SG.players[seat].alive)return {error:'脱落しています'};
   a=a||{};
+  /* 宣言だけは自分の手番でなくてもできる（実物ルール） */
+  if(a.type!=='declare'&&SG.turn!==seat)return {error:'あなたの手番ではありません'};
   try{
     switch(a.type){
       case 'flip':{
@@ -426,7 +432,7 @@ function applyAction(seat,a){
         const g=a.guess;
         if(!Array.isArray(g)||g.length!==5||g.some(function(v){return !(v>=1&&v<=60);}))
           return {error:'宣言は5つの数字を選んでください'};
-        actDeclare(SG,g.map(Number));return {ok:true};
+        actDeclare(SG,g.map(Number),seat);return {ok:true};
       }
     }
     return {error:'不明な操作です'};

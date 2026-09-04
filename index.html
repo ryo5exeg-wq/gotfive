@@ -218,7 +218,10 @@ button:disabled{opacity:.4;pointer-events:none;}
       </div>
     </div>
     <button class="primary" style="font-size:20px;padding:14px 44px;" onclick="startGame()">ゲームスタート！</button>
-    <button class="ghost" onclick="openRules()">あそびかた</button>
+    <div style="display:flex;gap:10px;">
+      <button class="ghost" onclick="openRules()">あそびかた</button>
+      <button class="ghost" onclick="location.href='https://ryo5exeg-wq.github.io/ponzi/'">🎲 ゲーム一覧へ</button>
+    </div>
   </div>
 
   <!-- ===== 対戦画面 ===== -->
@@ -228,6 +231,7 @@ button:disabled{opacity:.4;pointer-events:none;}
       <div class="sp"></div>
       <button class="ghost" onclick="openRules()">あそびかた</button>
       <button class="ghost" onclick="backToTitle()">タイトルへ</button>
+      <button class="ghost" onclick="location.href='https://ryo5exeg-wq.github.io/ponzi/'">🎲 ゲーム一覧へ</button>
     </div>
     <div id="opps"></div>
     <div id="fieldWrap"><h4 id="fieldTitle">場のタイル</h4><div id="field"></div></div>
@@ -289,7 +293,8 @@ button:disabled{opacity:.4;pointer-events:none;}
   <p><b>ドットのひみつ</b>：各色とも小さい数字から ●→●●→●●● の繰り返し
   （例：赤は1=●、6=●●、11=●●●、16=●…。全体では1〜5=●、6〜10=●●、11〜15=●●●、16〜20=●…）。<br>
   <b>色のひみつ</b>：赤1,6,11…／青2,7,12…／黄3,8,13…／緑4,9,14…／紫5,10,15…（5とびで循環）。</p>
-  <p>自信がついたら手番中いつでも<b>「ゴットファイブ！」</b>と宣言して5つの数字を当てる。
+  <p>自信がついたら<b>「ゴットファイブ！」</b>と宣言して5つの数字を当てる。
+  <b>宣言は自分の番でなくても、いつでもできる</b>（早い者勝ち！）。
   ぜんぶ正解なら勝ち！ 1つでも外れたら脱落…。</p>
   <div class="btns"><button class="primary" onclick="closeModal('mRule')">とじる</button></div>
 </div></div>
@@ -446,7 +451,8 @@ function renderMine(){
     h+='<div class="memoNote" style="text-align:center;">上の○＝ドット同じ／下の✕＝ドットちがう／すき間のタイル＝位置の答え</div>';
   $('myTiles').innerHTML=h;
   var myTurn=(G.turn===0&&me.alive&&G.phase!=='over'&&!busy);
-  $('btnDeclare').disabled=!myTurn;
+  /* 宣言はいつでもできる（相手の手番中でもOK＝実物ルール） */
+  $('btnDeclare').disabled=!(me.alive&&G.phase!=='over');
   $('btnPass').disabled=!(myTurn&&G.phase==='ask');
 }
 function renderLog(){
@@ -460,7 +466,7 @@ function renderPrompt(){
   var el=$('prompt'),me=G.players[0];
   if(G.phase==='over'){el.textContent='ゲーム終了';return;}
   if(!me.alive){el.textContent='あなたは脱落…。AIたちの勝負を見届けよう。';return;}
-  if(G.turn!==0||busy){el.textContent=G.players[G.turn].name+' の番です…';return;}
+  if(G.turn!==0||busy){el.textContent=G.players[G.turn].name+' の番です…（宣言はいつでもOK）';return;}
   if(G.phase==='flip')el.textContent='あなたの番！ 場のうら向きタイルを1枚タップしてめくろう';
   else el.textContent='ひかっているおもて向きタイルから1枚タップして質問！（宣言・「質問しない」もOK）';
 }
@@ -539,7 +545,7 @@ function humanPass(){
 
 /* ---- 宣言 ---- */
 function openDeclare(){
-  if(!G||busy||G.turn!==0)return;
+  if(!G||G.phase==='over'||!G.players[0].alive)return;
   decSel=[null,null,null,null,null];
   var me=G.players[0];
   /* 公開情報から残っている数字だけを出す（メモの消し込みも反映して表示） */
@@ -577,12 +583,13 @@ function doDeclare(){
     if(i>0&&decSel[i]<=decSel[i-1]){toast('左から小さい順になっていないよ！',1400);return;}
   }
   closeModal('mDec');
-  var ok=actDeclare(G,decSel.slice());
+  var ok=actDeclare(G,decSel.slice(),0); /* 手番外でも宣言できる */
   renderAll();
   if(ok){showResult();}
   else{
     toast('💥 はずれ！脱落…',1800);
-    setTimeout(afterHuman,1200);
+    /* AIの手番進行中なら既存のタイマーに任せる（二重進行を防ぐ） */
+    if(!busy)setTimeout(afterHuman,1200);
   }
 }
 
