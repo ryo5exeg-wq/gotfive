@@ -431,7 +431,7 @@ $('btnLink').onclick=function(){
 };
 function leaveRoom(){
   if(ST.view&&ST.view.phase!=='over'&&
-     !confirm('この部屋から抜けます。\n\n対戦中のあなたの番はAIが代わりに進めます。\n同じリンクを開けば戻ってこられます。'))return;
+     !confirm('この部屋から抜けます。\n\n抜けている間のあなたの番は、ホストが許可するとAIが進めます。\n同じリンクを開けば戻ってこられます。'))return;
   localStorage.removeItem(LSK);location.href=location.pathname;
 }
 $('btnLeave').onclick=leaveRoom;
@@ -439,7 +439,7 @@ $('btnLobby').onclick=leaveRoom;
 function gotoHub(){
   /* 対戦中は席を保持したまま一覧へ（同じリンクを開けば部屋に戻れる） */
   if(ST.view&&ST.view.phase!=='over'&&
-     !confirm('ゲーム一覧ページへ移動します。\n\n対戦中のあなたの番はAIが代わりに進めます。\nこのページを開き直せば部屋に戻れます。'))return;
+     !confirm('ゲーム一覧ページへ移動します。\n\n抜けている間のあなたの番は、ホストが許可するとAIが進めます。\nこのページを開き直せば部屋に戻れます。'))return;
   location.href='https://ryo5exeg-wq.github.io/ponzi/';
 }
 $('btnAgain').onclick=async function(){
@@ -499,13 +499,26 @@ function renderWait(){
     r.players.forEach(function(x){if(x.seat===s)p=x;});
     if(!p)h+='<div class="seat"><span class="dot"></span><span class="sub">空席 → AIが入ります</span></div>';
     else h+='<div class="seat"><span class="dot'+(p.connected?' on':'')+'"></span><b>'+esc(p.name)+'</b>'
-      +(r.host&&ST.you===s&&r.players[0]&&p.seat===r.players[0].seat?'':'')
+      +(p.seat===r.hostSeat?'<span class="sub">👑ホスト</span>':'')
       +(ST.you===s?'<span class="sub">（あなた）</span>':'')+'</div>';
   }
   $('wSeats').innerHTML=h;
-  var meIsHost=false;
-  r.players.forEach(function(x){if(x.seat===ST.you&&ST.room.host)meIsHost=true;});
   /* host判定はサーバーが弾くのでボタンは常に表示（押した人がホストでなければエラー表示） */
+}
+/* AI代行の許可ボタンを出せる人＝ホスト。ホスト自身が切断中なら誰でも */
+function canApproveAi(){
+  var r=ST.room;if(!r||r.hostSeat===undefined)return false;
+  if(ST.you===r.hostSeat)return true;
+  var hp=null;r.players.forEach(function(p){if(p.seat===r.hostSeat)hp=p;});
+  return !!(hp&&!hp.connected);
+}
+async function approveAi(seat,name){
+  if(!confirm(name+' さんは切断中です。\nAIに代行させますか？\n（本人がページを開き直せばいつでも復帰できます）'))return;
+  try{
+    var j=await api('/api/room/'+ST.code+'/aiok','POST',{playerId:ST.pid,seat:seat});
+    if(j.error)alert(j.error);
+  }catch(e){alert(e.message);}
+  poll();
 }
 
 /* ============================================================
@@ -580,9 +593,13 @@ function renderOpps(V){
   for(var p=0;p<V.players.length;p++){
     if(p===V.you)continue;
     var pl=V.players[p],rp=roomPlayer(p);
-    var st=!pl.alive?'💥脱落':(rp?(rp.connected?'':(rp.bot?'📶AI代行中':'')):'🤖AI');
+    var st=!pl.alive?'💥脱落':(rp?(rp.connected?'':(rp.bot?'📶AI代行中':'📶切断中')):'🤖AI');
+    var aiBtn='';
+    if(pl.alive&&rp&&rp.aiPending&&canApproveAi())
+      aiBtn='<button class="ghost" style="padding:4px 10px;font-size:12px;margin-top:3px;" '
+        +'onclick="approveAi('+p+',\''+esc(pl.name).replace(/'/g,'')+'\')">🤖 AIに代行させる</button>';
     h+='<div class="opp'+(pl.alive?'':' dead')+(V.turn===p&&V.phase!=='over'?' turnNow':'')+'">'+
-      '<div class="nm">'+esc(pl.name)+(st?'<br><span class="st">'+st+'</span>':'')+'</div>'+
+      '<div class="nm">'+esc(pl.name)+(st?'<br><span class="st">'+st+'</span>':'')+aiBtn+'</div>'+
       '<div class="rackScroll">'+rackHTML(V,p)+'</div></div>';
   }
   $('opps').innerHTML=h;
